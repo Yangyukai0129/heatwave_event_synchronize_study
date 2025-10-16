@@ -7,8 +7,8 @@ import re
 plt.rcParams['font.family'] = ['Microsoft JhengHei']  # 或 'SimHei'、'Noto Sans CJK TC'
 plt.rcParams['axes.unicode_minus'] = False  # 負號正常顯示
 
-df_clusters = pd.read_csv("Hierarchical clustering/hierarchical_clustering_result_95threshold_post30y.csv")
-df_events = pd.read_csv("events_transactions_95threshold_post30y.csv")
+df_clusters = pd.read_csv("data/Hierarchical clustering/階層式分群結果/hierarchical_clustering_result_95threshold_post30y.csv")
+df_events = pd.read_csv("data/同步熱浪事件/events_transactions_95threshold_post30y.csv")
 
 # -----------------------------
 # 將 nodes / latitudes / longitudes 轉成 list
