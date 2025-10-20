@@ -6,7 +6,7 @@ import numpy as np
 import seaborn as sns
 
 # ======== 可調整參數 ========
-csv_path = "Hierarchical clustering/hierarchical_clustering_result_95threshold_pre30y.csv"   # 你的 CSV 檔案路徑
+csv_path = "data/Hierarchical clustering/階層式分群結果/hierarchical_clustering_result_95threshold_pre30y.csv"   # 你的 CSV 檔案路徑
 clusters_to_plot = [6,9,11] # 想要畫的 cluster 編號（可自行修改）
 # ============================
 
@@ -26,20 +26,26 @@ df = df[df['cluster'].isin(clusters_to_plot)]
 # cmap = plt.cm.get_cmap('hsv', len(clusters_to_plot))
 # colors = [cmap(i) for i in range(len(clusters_to_plot))]
 
-colors = sns.color_palette("tab20", len(clusters_to_plot))  # 或 "husl", "Set3", "Paired"
+colors = sns.color_palette("husl", len(clusters_to_plot))  # 或 "husl", "Set3", "Paired"
 
 # 5. 畫地圖
-plt.figure(figsize=(10, 6))
-ax = plt.axes(projection=ccrs.PlateCarree())
+fig = plt.figure(figsize=(12, 8))
+ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
 
-# 加底圖
-ax.add_feature(cfeature.LAND, facecolor='lightgray')
+ax.add_feature(cfeature.LAND, edgecolor='black', facecolor='lightgray')
 ax.add_feature(cfeature.OCEAN, facecolor='lightblue')
-ax.add_feature(cfeature.BORDERS, linestyle=':')
 ax.add_feature(cfeature.COASTLINE)
-
-# 範圍自動根據資料調整
+ax.add_feature(cfeature.BORDERS, linestyle=':')
 ax.set_extent([-180, 180, 0, 90], crs=ccrs.PlateCarree())
+
+gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True,
+                  linewidth=0.5, color='gray', alpha=0.5, linestyle='--')
+gl.xlabels_top = False
+gl.ylabels_right = False
+
+# 標籤控制
+ante_plotted = False
+cons_plotted = False
 
 # 6. 逐個 cluster 畫圖
 for i, cluster_id in enumerate(clusters_to_plot):
