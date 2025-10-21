@@ -11,7 +11,7 @@ import pandas as pd
 # 1. 讀取共識矩陣
 # -----------------------
 tmp = pd.read_csv(
-    'consensus_clustering/consensus_matrix_from_events_95threshold_post30y.csv',
+    'data/consensus_clustering/consensus_matrix_from_events_95threshold_pre30y.csv',
     header=None
 )
 
@@ -56,31 +56,40 @@ Z = linkage(condensed, method='average')  # 或 'ward' 但 ward 需要原始特�
 # --------------------------
 # silhouette分數
 # --------------------------
-# from sklearn.metrics import silhouette_score
-# from scipy.cluster.hierarchy import fcluster
+from sklearn.metrics import silhouette_score
+from scipy.cluster.hierarchy import fcluster
 
-# best_score, best_k = -1, None
-# for k in range(2, 200):
-#     labels = fcluster(Z, k, criterion='maxclust')
-#     score = silhouette_score(D, labels, metric='precomputed')
-#     if score > best_score:
-#         best_score, best_k = score, k
-# print(f"最佳群數 k = {best_k}, silhouette = {best_score:.3f}")
+min_size = 6
+best_score, best_k = -1, None
+
+for k in range(2, 200):
+    labels = fcluster(Z, k, criterion='maxclust')
+    
+    # 檢查每個群大小
+    cluster_sizes = pd.Series(labels).value_counts()
+    if cluster_sizes.min() < min_size:
+        continue  # 有群太小就跳過
+    
+    score = silhouette_score(D, labels, metric='precomputed')
+    if score > best_score:
+        best_score, best_k = score, k
+
+print(f"最佳群數 k = {best_k}, silhouette = {best_score:.3f}")
 
 
 # --------------------------
 # 根據node把對應cluster存起來
 # --------------------------
-k = 194
-labels = fcluster(Z, k, criterion='maxclust')
+# k = 14
+# labels = fcluster(Z, k, criterion='maxclust')
 
-cluster_result = pd.DataFrame({
-    'node': nodes,
-    'cluster': labels
-})
+# cluster_result = pd.DataFrame({
+#     'node': nodes,
+#     'cluster': labels
+# })
 
-print(cluster_result.head())
-cluster_result.to_csv('Hierarchical clustering/hierarchical_clustering_result_95threshold_post30y.csv', index=False)
+# print(cluster_result.head())
+# cluster_result.to_csv('data/Hierarchical clustering/階層式分群結果/hierarchical_clustering_result_95threshold_pre30y_min6.csv', index=False)
 
 
 # --------------------------
