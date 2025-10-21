@@ -7,10 +7,7 @@ import seaborn as sns
 
 # ======== 可調整參數 ========
 csv_path = "data/Hierarchical clustering/階層式分群結果/hierarchical_clustering_result_95threshold_post30y.csv"
-clusters_to_plot = [12, 16, 17, 22, 42, 41, 36, 27, 26, 60, 61, 68, 71, 72, 45, 50, 59, 76, 74, 91, 
-                    87, 86, 81, 80, 79, 115, 120, 128, 132, 136, 140, 92, 95, 96, 99, 101, 102, 105, 
-                    106, 107, 113, 146, 150, 159, 162, 163, 185, 142, 143, 186, 21, 18, 25, 19, 15, 
-                    193, 78]
+clusters_to_plot = [12, 16, 17, 22, 42, 41, 36, 27, 26, 50, 45, 59, 79, 76, 72, 68, 61, 136, 105, 106, 107, 115, 80, 81, 86, 95, 87, 91, 92, 99, 96, 101, 102, 159, 142, 143, 146, 185, 120, 128, 132, 186, 162, 21, 18, 25, 19, 78, 20]
 clusters_per_fig = 10   # 每張圖要畫幾個 cluster
 # ============================
 
@@ -58,6 +55,6 @@ for start in range(0, len(clusters_to_plot), clusters_per_fig):
                    label=f'Cluster {cluster_id}')
     
     plt.legend(loc='lower left', fontsize=8, frameon=False)
-    plt.title(f'Clusters {group[0]}–{group[-1]} (pre30y)', fontsize=14)
+    plt.title(f'Clusters {group[0]}–{group[-1]} (post30y)', fontsize=14)
     plt.tight_layout()
     plt.show()
