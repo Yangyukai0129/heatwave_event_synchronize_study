@@ -3,88 +3,114 @@ from openai import OpenAI
 import json
 import pandas as pd
 
-# --- 1. OpenRouter 配置 ---
-# 在 OpenRouter 官網申請 API Key
-OPENROUTER_API_KEY = ""
+API_KEY = ""
 
-# OpenRouter 配置
 client_llm = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
+    api_key=API_KEY,
 )
 
-class FPGrowthReflectingAgent:
-    def __init__(self, db_path="./fp_growth_db"):
+class FPGrowthAlignmentAgent:
+    def __init__(self, db_path="./geo_rag_db"):
         self.chroma_client = chromadb.PersistentClient(path=db_path)
-        self.collection = self.chroma_client.get_collection(name="coordinate_rules_cluster11")
+        self.collection = self.chroma_client.get_collection(name="geo_rules_cl11")
 
-    def retrieve_historical_rules(self, transactions, top_k=5):
-        # 這裡建議將 DataFrame 轉為字串進行檢索
-        query_text = str(transactions) 
-        results = self.collection.query(query_texts=[query_text], n_results=top_k)
-        context = ""
-        if results['documents']:
-            for i, doc in enumerate(results['documents'][0]):
-                context += f"歷史規則 {i+1}: {doc}\n"
-        return context
+    def retrieve_historical_rules(self, reasoning_result):
+            """
+            修正版：解析初步規則，利用特徵相似性進行『偽共現』檢索。
+            """
+            try:
+                # 1. 解析初步推理出的 JSON
+                data = json.loads(reasoning_result)
+                # 假設 JSON 中包含 rules 列表，取出第一個規則的座標作為關鍵詞
+                rules = data.get('rules', [])
+                if rules:
+                    target_ante = rules[0].get('ante_key', "")
+                    target_conse = rules[0].get('conse_key', "")
+                    query_text = f"位置 {target_ante} 與 {target_conse} 的地理關聯規律"
+                else:
+                    query_text = str(reasoning_result)
+            except:
+                query_text = str(reasoning_result)
 
-    def run_analysis(self, user_transactions):
-        historical_evidence = self.retrieve_historical_rules(user_transactions)
-        system_prompt = "你是一位地理數據專家。請根據提供數據產出關聯規則 JSON，並執行自我反思。"
-        
-        user_prompt = f"數據：{user_transactions}\n歷史規則：\n{historical_evidence}\n回傳格式：JSON (ante, conse, support, confidence, lift, status, reflection_note)"
+            # 2. 執行檢索，同時要求回傳 metadatas (包含我們做好的 s_norm, l_norm 等)
+            results = self.collection.query(
+                query_texts=[query_text], 
+                n_results=5,
+                include=['documents', 'metadatas']
+            )
 
-        response = client_llm.chat.completions.create(
-            model="openai/gpt-4o",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-            response_format={ "type": "json_object" }
-        )
-        return response.choices[0].message.content
-
-    def re_fix_analysis(self, user_transactions, wrong_result, critic_feedback):
-        """根據稽核員的意見進行修正"""
-        historical_evidence = self.retrieve_historical_rules(user_transactions)
-        
-        system_prompt = "你是一位負責修正數據的專家。請根據稽核員的具體意見，修正之前的錯誤結果。"
-        user_prompt = f"""
-        【之前的錯誤結果】：{wrong_result}
-        【稽核員意見】：{critic_feedback}
-        【參考歷史證據】：{historical_evidence}
-        
-        請重新產出修正後的 JSON 報告。
-        """
-        
-        response = client_llm.chat.completions.create(
-            model="openai/gpt-4o",
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-            response_format={ "type": "json_object" }
-        )
-        return response.choices[0].message.content
-
-    def run_analysis_with_loop(self, user_transactions, max_retries=2):
-        print("--- 開始第一輪推論 ---")
-        current_result = self.run_analysis(user_transactions)
-        
-        for i in range(max_retries):
-            # 2. 稽核員進行審查 (建議用邏輯較強的模型，如 Claude 3.5 Sonnet)
-            review_prompt = f"請稽核此結果是否符合歷史規則：{current_result}\n證據：{self.retrieve_historical_rules(user_transactions)}\n有錯請指出，無錯請回傳 OK。"
-            
-            review_check = client_llm.chat.completions.create(
-                model="anthropic/claude-3.5-sonnet",
-                messages=[{"role": "user", "content": review_prompt}]
-            ).choices[0].message.content
-
-            if "OK" in review_check.upper():
-                print(f"--- 稽核通過 (第 {i+1} 輪) ---")
-                return current_result
+            context = ""
+            if results['documents'] and len(results['documents'][0]) > 0:
+                for i, (doc, meta) in enumerate(zip(results['documents'][0], results['metadatas'][0])):
+                    # 注入特徵工程後的數值，讓 Stage 2 的專家 Agent 能判斷這筆歷史資料的強度
+                    context += f"【歷史真實規則 {i+1}】：{doc} (特徵強度: {meta})\n"
             else:
-                print(f"--- 稽核失敗：{review_check} ---")
-                current_result = self.re_fix_analysis(user_transactions, current_result, review_check)
-        
-        return current_result
+                context = "⚠️ 未找到精確座標匹配。請基於地理特徵相似性進行『偽共現』推理，判斷初步計算是否符合該區域的物理邏輯。\n"
+                
+            return context
 
-# --- 執行 ---
+    def run_stage_1_reasoning(self, raw_data_str):
+        system_prompt = """
+        你是一位地理數據科學家。請掃描原始交易資料並執行 FP-Growth 推理。
+        1. 計算規則：Support=共現/總數, Confidence=共現/前項數, Lift=Conf/後項支持度。
+        2. 物理門檻：僅保留 Lift > 1.2 的規則。
+        3. 空間分類：
+        - 距離 > 2500km -> Teleconnection
+        - 距離 < 2500km -> Regional Diffusion
+        請以 JSON 格式回傳，確保數據純淨，不含解釋文字。
+        """
+        response = client_llm.chat.completions.create(
+            model="openai/gpt-4o",
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": raw_data_str}],
+            response_format={ "type": "json_object" }
+        )
+        return response.choices[0].message.content
+
+    def run_stage_2_reflecting(self, raw_data_str, reasoning_result):
+        historical_evidence = self.retrieve_historical_rules(reasoning_result)
+        
+        system_prompt = """
+        你是一位精準的數據稽核專家。請比對『初步計算』與『真實規則庫』並產出最終修正結果。
+
+        1. 強制對齊邏輯：
+           - 若初步計算的座標與真實規則庫中的座標「高度相似」或「一致」，必須優先採用『真實規則庫』的數值（Support, Confidence, Lift）。
+           - 若初步計算的規則在真實庫中完全找不到，且 Lift 過低 (< 1.5)，請將其剔除。
+        2. 偽共現推理：
+           - 若座標不完全一致但屬於鄰近區域，請參考真實規則的數值水準調優初步結果。
+        3. 輸出規範：
+           - 必須回傳 JSON 對象，包含：
+             - "status": "fixed"
+             - "final_rules": [修正後的規則列表，格式同 Stage 1]
+             - "reflection_note": [解釋修正了哪些地方]
+        """
+
+        user_prompt = f"""
+        【初步計算結果】：{reasoning_result}
+        【歷史真實參考】：{historical_evidence}
+        【原始交易資料參考】：{raw_data_str}
+        
+        請根據歷史證據，對初步結果進行修正並產出最終 rules。
+        """
+
+        response = client_llm.chat.completions.create(
+            model="anthropic/claude-3.5-sonnet", # 推薦用邏輯更強的模型進行修正
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            response_format={ "type": "json_object" }
+        )
+        return response.choices[0].message.content
+
+# --- 執行流程 ---
 df = pd.read_csv('data/Hierarchical clustering/分群篩選後資料/pre/transactions_cluster_95threshold_pre30y_cluster11.csv')
-agent = FPGrowthReflectingAgent()
-result = agent.run_analysis_with_loop(df)
-print(result)
+raw_data_str = df.to_string()
+
+agent = FPGrowthAlignmentAgent()
+
+print("--- 步驟 1: 原始數據推理 ---")
+initial_reasoning = agent.run_stage_1_reasoning(raw_data_str)
+print(initial_reasoning)
+
+print("--- 步驟 2 & 3: 檢索、比對、反思修正 ---")
+final_report = agent.run_stage_2_reflecting(raw_data_str, initial_reasoning)
+
+print(final_report)
