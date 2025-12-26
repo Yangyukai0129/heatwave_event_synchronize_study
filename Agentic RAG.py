@@ -3,77 +3,86 @@ from openai import OpenAI
 import json
 import pandas as pd
 
-# --- 1. OpenRouter 配置 ---
-# 在 OpenRouter 官網申請 API Key
-OPENROUTER_API_KEY = ""
+API_KEY = ""
 
 client_llm = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
+    api_key=API_KEY,
 )
 
-class FPGrowthReflectingAgent:
-    def __init__(self, db_path="./fp_growth_db"):
+class GeoKnowledgeAgent:
+    def __init__(self, db_path="./geo_rag_db"):
         self.chroma_client = chromadb.PersistentClient(path=db_path)
-        self.collection = self.chroma_client.get_collection(name="coordinate_rules_cluster11")
+        # 確保名稱與你入庫時一致
+        self.collection = self.chroma_client.get_collection(name="geo_rules_cl11")
 
-    def retrieve_historical_rules(self, transactions, top_k=5):
-        query_text = " ".join(transactions)
+    def search_expert_knowledge(self, user_query):
+        """根據使用者提問，搜尋地理規律並進行專業解釋"""
+        
+        # 1. 檢索最相關的地理規則
         results = self.collection.query(
-            query_texts=[query_text],
-            n_results=top_k
+            query_texts=[user_query],
+            n_results=3,
+            include=['documents', 'metadatas']
         )
+        
+        # 2. 格式化檢索結果供 LLM 參考
         context = ""
         if results['documents']:
-            for i, doc in enumerate(results['documents'][0]):
-                context += f"歷史規則 {i+1}: {doc}\n"
-        return context
+            for i, (doc, meta) in enumerate(zip(results['documents'][0], results['metadatas'][0])):
+                context += f"【地理規則實體 {i+1}】：{doc} (特徵指標: {meta})\n"
 
-    def run_analysis(self, user_transactions):
-        historical_evidence = self.retrieve_historical_rules(user_transactions)
-
-        # 增加 Reflecting (反思) 邏輯的 System Prompt
+        # 3. 氣象/地理專家進行解釋
         system_prompt = """
-        你是一位具備高度自我批判能力的地理數據科學家。
-        請遵循以下「思考-檢索-反思-修正」流程：
-
-        1. 【初步推理】：根據輸入 Transaction 計算潛在的 ante->conse 關聯。
-        2. 【檢索比對】：對照提供的「歷史規則庫」。
-        3. 【自我反思 (Reflection)】：
-           - 檢查：我算出的 Lift 與歷史數據是否有顯著差異？
-           - 質疑：若附近沒有同步事件，是否因為目前數據量不足以支撐該規則？
-           - 判斷：歷史規則與當前數據哪個更具備共識代表性？
-        4. 【最終輸出】：給出經過反思後的精確 JSON 報告。
+        你是一位資深地理氣象專家。請根據檢索到的地理規則實體，回答使用者的問題。
+        你的任務是：
+        1. 解釋這些地理關聯背後的物理意義（例如：遠距連結 Teleconnection 或區域擴散）。
+        2. 根據提供特徵指標（Lift/Confidence），評估該現象發生的可能性。
+        3. 如果找不到完全一致的地點，請利用『偽共現』邏輯，參考最相似的地點特徵給出推論。
+        請以專業且易懂的語氣回覆，輸出為 JSON 格式，包含 'expert_analysis'。
         """
-
-        user_prompt = f"""
-        【目前交易資料】：{user_transactions}
         
-        【歷史規則庫檢索結果】：
-        {historical_evidence}
-        
-        請分析並回傳 JSON 格式結果，欄位包含：
-        ante, conse, support, confidence, lift, status, reflection_note(你的反思紀錄)
-        """
-
-        # 呼叫 OpenRouter 上的模型 (例如 claude-3-sonnet 或 gpt-4o)
         response = client_llm.chat.completions.create(
-            extra_headers={
-                "HTTP-Referer": "http://localhost:3000", # 選填，OpenRouter 統計用
-                "X-Title": "FP-Growth RAG Agent",        # 選填
-            },
-            model="openai/gpt-4o", # 也可以換成 "anthropic/claude-3-sonnet"
+            model="openai/gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": f"使用者提問：{user_query}\n\n檢索到的背景知識：\n{context}"}
             ],
             response_format={ "type": "json_object" }
         )
-
         return response.choices[0].message.content
 
-# --- 執行 ---
-current_transactions = pd.read_csv('data/Hierarchical clustering/分群篩選後資料/pre/transactions_cluster_95threshold_pre30y_cluster11.csv')
-agent = FPGrowthReflectingAgent()
-result = agent.run_analysis(current_transactions)
-print(result)
+    def audit_and_finalize(self, expert_analysis):
+        """第二階段：稽核專家確保結論符合統計強度"""
+        
+        system_prompt = """
+        你是一位數據稽核專家。請審查氣象專家的分析報告。
+        1. 嚴格檢查：若 Lift < 2.0，請提醒用戶該關聯性較弱。
+        2. 空間邏輯：檢查分析是否符合地理近鄰約束。
+        3. 最終校正：確保報告中沒有過度推論。
+        輸出 JSON，包含 'final_report' 與 'audit_note'。
+        """
+        
+        response = client_llm.chat.completions.create(
+            model="anthropic/claude-3.5-sonnet",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"待審查報告：{expert_analysis}"}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        return response.choices[0].message.content
+
+# --- 執行流程 ---
+agent = GeoKnowledgeAgent()
+
+# 範例：User 不再給 CSV，而是問一個具體的位置
+user_input = "我想知道座標 72.625_-102.625 附近有哪些顯著的氣象關聯規律？"
+
+print("--- 階段 1: 專家檢索與專業解釋 ---")
+expert_json = agent.search_expert_knowledge(user_input)
+print(expert_json)
+
+print("\n--- 階段 2: 數據稽核與最終報告 ---")
+final_json = agent.audit_and_finalize(expert_json)
+print(final_json)
