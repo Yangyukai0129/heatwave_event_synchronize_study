@@ -8,3 +8,5 @@ pic/
 visualization/*png
 visualization/*csv
 visualization/*gif
+
+.env
